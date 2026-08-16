@@ -54,6 +54,32 @@ reader --import ~/books   # только импортировать, без ин
 
 Проще всего складывать книги в `~/Books`: при каждом запуске папка сканируется сама. Сначала показывается заставка с логотипом, Enter вводит в библиотеку (или сразу в книгу, если она передана аргументом).
 
+## Книги из IPFS
+
+Книги в формате манифеста protocol-core можно открыть прямо по CID. Сначала reader делает HEAD-запрос к публичным шлюзам IPFS (проверка доступности и размера), затем скачивает манифест как dag-json (ссылки в виде `{"/": cid}`) или сырой DAG-CBOR блок. Если публичные шлюзы недоступны, пробует локальный Kubo (`http://localhost:5001`). Текст глав скачивается по CID из ресурсов-блобов.
+
+```bash
+# открыть книгу по CID манифеста прямо в читалке
+reader cid bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou
+
+# сохранить в каталог в выбранном формате (нативный манифест, fb2 или epub)
+reader cid bafyr4... --save ~/books --format fb2
+reader cid bafyr4... --save ~/books --format epub
+reader cid bafyr4... --save ~/books --format native
+
+# свой шлюз или локальный Kubo
+reader cid bafyr4... --ipfs-gateway https://dweb.link --kubo http://localhost:5001
+```
+
+Флаги:
+
+| Флаг | Назначение |
+|---|---|
+| `--save DIR` | сохранить книгу в каталог вместо открытия в читалке |
+| `--format` | `native` (манифест), `fb2` или `epub` |
+| `--ipfs-gateway` | публичный шлюз IPFS (можно несколько) |
+| `--kubo` | адрес локального Kubo API |
+
 ## Клавиши
 
 Библиотека:

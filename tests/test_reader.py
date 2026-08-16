@@ -9,7 +9,7 @@ from reader.importers import parse
 from reader.models import Format
 from reader.renderer import BookRenderer
 
-from fixtures import build_epub, build_fb2, build_txt, write_fixture
+from fixtures import build_epub, build_fb2, build_ipfsbook, build_txt, write_fixture
 
 
 @pytest.fixture
@@ -30,6 +30,13 @@ def book_fb2(tmp_path: Path) -> Path:
 def book_epub(tmp_path: Path) -> Path:
     p = tmp_path / "book.epub"
     write_fixture(p, build_epub())
+    return p
+
+
+@pytest.fixture
+def book_ipfsbook(tmp_path: Path) -> Path:
+    p = tmp_path / "book.ipfsbook"
+    write_fixture(p, build_ipfsbook())
     return p
 
 
@@ -161,6 +168,129 @@ class TestRtf:
         assert book.title == "Моя RTF-книга"
         assert [c.title for c in book.chapters] == ["Глава 1", "Глава 2"]
         assert book.chapters[0].paragraphs == ["Текст первой главы."]
+
+
+class TestIpfsbook:
+    def test_metadata(self, book_ipfsbook: Path):
+        book = parse(book_ipfsbook)
+        assert book.format == Format.IPFSBOOK
+        assert book.title == "Тестовая книга"
+        assert book.authors == ["Иван Автор"]
+        assert book.year == 2020
+        assert book.language == "ru"
+        assert "Аннотация" in book.description
+
+    def test_chapters(self, book_ipfsbook: Path):
+        book = parse(book_ipfsbook)
+        assert [c.title for c in book.chapters] == ["Глава первая", "Глава вторая"]
+        assert book.chapters[0].paragraphs == [
+            "Первый абзац первой главы. Второе предложение.",
+            "Второй абзац первой главы.",
+        ]
+        assert book.chapters[1].paragraphs == ["Первый абзац второй главы."]
+
+    def test_sniff_json_without_extension(self, tmp_path: Path):
+        import json
+
+        p = tmp_path / "book.json"
+        manifest = {
+            "@context": "ipfs://schema/book/0.1.0",
+            "version": 1,
+            "releaseGroupId": "11111111-1111-1111-1111-111111111111",
+            "releaseId": "22222222-2222-2222-2222-222222222222",
+            "contentType": "book",
+            "title": "JSON без расширения",
+            "contributors": [{"name": "Автор", "role": "author"}],
+            "components": [
+                {
+                    "title": "Глава",
+                    "position": 1,
+                    "kind": "chapter",
+                    "resources": [
+                        {
+                            "cid": "bafy1",
+                            "mediaType": "text/plain",
+                            "role": "text",
+                            "text": "Текст главы.",
+                        }
+                    ],
+                }
+            ],
+        }
+        p.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        book = parse(p)
+        assert book.format == Format.IPFSBOOK
+        assert book.title == "JSON без расширения"
+        assert book.chapters[0].paragraphs == ["Текст главы."]
+
+    def test_blob_from_sibling_file(self, tmp_path: Path):
+        import json
+
+        chapter_file = tmp_path / "chapter1.txt"
+        chapter_file.write_text("Текст из файла рядом с манифестом.", encoding="utf-8")
+        manifest = {
+            "@context": "ipfs://schema/book/0.1.0",
+            "version": 1,
+            "releaseGroupId": "11111111-1111-1111-1111-111111111111",
+            "releaseId": "22222222-2222-2222-2222-222222222222",
+            "contentType": "book",
+            "title": "Файл рядом",
+            "components": [
+                {
+                    "title": "Глава",
+                    "position": 1,
+                    "kind": "chapter",
+                    "resources": [
+                        {
+                            "cid": "bafy1",
+                            "mediaType": "text/plain",
+                            "role": "text",
+                            "path": "chapter1.txt",
+                        }
+                    ],
+                }
+            ],
+        }
+        p = tmp_path / "book.ipfsbook"
+        p.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        book = parse(p)
+        assert book.chapters[0].paragraphs == ["Текст из файла рядом с манифестом."]
+
+    def test_rejects_path_outside_dir(self, tmp_path: Path):
+        import json
+
+        outside = tmp_path.parent / "outside.txt"
+        outside.write_text("секрет", encoding="utf-8")
+        try:
+            manifest = {
+                "@context": "ipfs://schema/book/0.1.0",
+                "version": 1,
+                "releaseGroupId": "11111111-1111-1111-1111-111111111111",
+                "releaseId": "22222222-2222-2222-2222-222222222222",
+                "contentType": "book",
+                "title": "Побег",
+                "components": [
+                    {
+                        "title": "Глава",
+                        "position": 1,
+                        "kind": "chapter",
+                        "resources": [
+                            {
+                                "cid": "bafy1",
+                                "mediaType": "text/plain",
+                                "role": "text",
+                                "path": "../outside.txt",
+                            }
+                        ],
+                    }
+                ],
+            }
+            p = tmp_path / "book.ipfsbook"
+            p.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+            with pytest.raises(ValueError):
+                parse(p)
+        finally:
+            outside.unlink(missing_ok=True)
 
 
 class TestDocx:

@@ -27,6 +27,8 @@ _EXT_FORMATS = {
     "djvu": Format.DJVU,
     "djv": Format.DJVU,
     "doc": Format.DOC,
+    "ipfsbook": Format.IPFSBOOK,
+    "ipfs-book": Format.IPFSBOOK,
 }
 
 
@@ -44,11 +46,44 @@ def detect_format(path: Path) -> Format:
     return _EXT_FORMATS.get(ext, Format.UNKNOWN)
 
 
+_IPFSBOOK_CONTEXT = b"ipfs://schema/book/"
+_IPFSBOOK_CONTENT_TYPE = b'"contentType": "book"'
+
+
+def _sniff_ipfsbook(path: Path) -> Format:
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return Format.UNKNOWN
+    if _IPFSBOOK_CONTEXT not in raw and _IPFSBOOK_CONTENT_TYPE not in raw:
+        return Format.UNKNOWN
+    try:
+        import json
+
+        manifest = json.loads(raw)
+    except (ValueError, TypeError):
+        return Format.UNKNOWN
+    if not isinstance(manifest, dict):
+        return Format.UNKNOWN
+    ctx = manifest.get("@context", "")
+    if isinstance(ctx, str) and ctx.startswith("ipfs://schema/book/"):
+        return Format.IPFSBOOK
+    if (manifest.get("components") or manifest.get("chapters")) and (
+        manifest.get("contentType") == "book"
+        or manifest.get("bookDetails")
+        or manifest.get("title")
+    ):
+        return Format.IPFSBOOK
+    return Format.UNKNOWN
+
+
 def sniff(path: Path) -> Format:
     """Определение по расширению + содержимому, включая FB2 без расширения."""
     fmt = detect_format(path)
     if fmt != Format.UNKNOWN:
         return fmt
+    if _sniff_ipfsbook(path) == Format.IPFSBOOK:
+        return Format.IPFSBOOK
     try:
         with open(path, "rb") as f:
             head = f.read(512)

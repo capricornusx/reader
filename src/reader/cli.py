@@ -40,12 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         "--format", choices=("native", "fb2", "epub"), default="native",
         help="формат сохранения книги из IPFS (по умолчанию нативный манифест)",
     )
-    parser.add_argument("--ipfs-gateway", action="append", help="публичный шлюз IPFS (можно несколько)")
-    parser.add_argument("--kubo", default="http://localhost:5001", help="адрес RPC API локального Kubo (:5001)")
-    parser.add_argument(
-        "--kubo-gateway", default="http://localhost:8080",
-        help="адрес локального HTTP-шлюза Kubo (:8080)",
-    )
+    parser.add_argument("--ipfs-gateway", action="append", help="шлюз IPFS (можно несколько; по умолчанию локальный :8080 + публичные)")
 
     args = parser.parse_args(raw)
 
@@ -82,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _looks_like_cid(value: str) -> bool:
-    from .ipfs.gateway import is_cid
+    from .ipfs.cid import is_cid
 
     return is_cid(value)
 
@@ -117,8 +112,6 @@ def _open_cid(cid: str, args) -> int:
     from .ipfs.gateway import DEFAULT_GATEWAYS
 
     gateways = tuple(args.ipfs_gateway) if args.ipfs_gateway else DEFAULT_GATEWAYS
-    kubo = args.kubo if args.kubo else None
-    kubo_gateway = args.kubo_gateway if args.kubo_gateway else None
 
     def on_progress(p):
         if p.stage == "probe":
@@ -132,9 +125,7 @@ def _open_cid(cid: str, args) -> int:
             print("Готово.")
 
     try:
-        book = ipfs_book.open_by_cid(
-            cid, gateways=gateways, kubo=kubo, kubo_gateway=kubo_gateway, on_progress=on_progress
-        )
+        book = ipfs_book.open_by_cid(cid, gateways=gateways, on_progress=on_progress)
     except Exception as e:  # noqa: BLE001
         print(f"reader: {e}", file=sys.stderr)
         return 3

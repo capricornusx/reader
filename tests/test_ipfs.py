@@ -12,6 +12,7 @@ import pytest
 from reader.exporters import convert, to_epub, to_fb2
 from reader.importers.ipfsbook import IpfsBook, ManifestError, parse_manifest
 from reader.ipfs import dagcbor, gateway
+from reader.ipfs.cid import is_cid as cid_is_valid
 from reader.ipfs.book import open_by_cid
 from reader.models import Chapter, Format, ParsedBook
 
@@ -90,14 +91,14 @@ class TestDagCbor:
 
 class TestGatewayCid:
     def test_is_cid_v0(self):
-        assert gateway.is_cid("Qm" + "a" * 44)  # 46 chars total
+        assert cid_is_valid("Qm" + "a" * 44)  # 46 chars total
 
     def test_is_cid_v1(self):
-        assert gateway.is_cid("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou")
+        assert cid_is_valid("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou")
 
     def test_rejects_garbage(self):
-        assert not gateway.is_cid("not-a-cid")
-        assert not gateway.is_cid("")
+        assert not cid_is_valid("not-a-cid")
+        assert not cid_is_valid("")
 
 
 class TestGatewayFetch:
@@ -113,19 +114,19 @@ class TestGatewayFetch:
     def test_probe_head_finds_size(self):
         with mock.patch("urllib.request.urlopen") as urlopen:
             urlopen.return_value = self._fake_response(b"", headers={"Content-Length": "42"})
-            info = gateway.probe("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None)
+            info = gateway.probe("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",))
         assert info.available and info.size == 42
 
     def test_probe_falls_through_to_unavailable(self):
         with mock.patch("urllib.request.urlopen", side_effect=OSError("nope")):
-            info = gateway.probe("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None)
+            info = gateway.probe("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",))
         assert not info.available
 
     def test_fetch_manifest_dag_json(self):
         manifest = {"@context": "ipfs://schema/book/0.1.0", "title": "X", "components": []}
         with mock.patch("urllib.request.urlopen") as urlopen:
             urlopen.return_value = self._fake_response(json.dumps(manifest).encode())
-            result = gateway.fetch_manifest("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None)
+            result = gateway.fetch_manifest("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",))
         assert result["title"] == "X"
 
     def test_fetch_manifest_raw_cbor_fallback(self):
@@ -142,19 +143,19 @@ class TestGatewayFetch:
             return self._fake_response(cbor_bytes)
 
         with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            result = gateway.fetch_manifest("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None)
+            result = gateway.fetch_manifest("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",))
         assert result["title"] == "CBOR"
 
     def test_fetch_blob_downloads_bytes(self):
         with mock.patch("urllib.request.urlopen") as urlopen:
             urlopen.return_value = self._fake_response(b"chapter text")
-            data = gateway.fetch_blob("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None)
+            data = gateway.fetch_blob("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",))
         assert data == b"chapter text"
 
     def test_fetch_blob_raises_when_all_fail(self):
         with mock.patch("urllib.request.urlopen", side_effect=OSError("nope")):
             with pytest.raises(gateway.IpfsError):
-                gateway.fetch_blob("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None)
+                gateway.fetch_blob("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",))
 
 
 class TestManifestFromCid:
@@ -228,8 +229,6 @@ class TestManifestFromCid:
             book = open_by_cid(
                 manifest_cid,
                 gateways=("https://x",),
-                kubo=None,
-                kubo_gateway=None,
                 on_progress=lambda p: stages.append(p.stage),
             )
         assert book.title == "Полный путь"
@@ -239,11 +238,11 @@ class TestManifestFromCid:
     def test_open_by_cid_unavailable(self):
         with mock.patch("urllib.request.urlopen", side_effect=OSError("nope")):
             with pytest.raises(ManifestError, match="недоступен"):
-                open_by_cid("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None, kubo_gateway=None)
+                open_by_cid("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",))
 
     def test_open_by_cid_bad_cid(self):
         with pytest.raises(ManifestError, match="некорректный"):
-            open_by_cid("garbage", gateways=("https://x",), kubo=None, kubo_gateway=None)
+            open_by_cid("garbage", gateways=("https://x",))
 
 
 def _ctx(resp):
@@ -327,25 +326,6 @@ class TestExporters:
             convert(book, "pdf")
 
 
-class TestGatewayKuboGateway:
-    def test_resolve_gateways_puts_kubo_first(self):
-        from reader.ipfs.gateway import _resolve_gateways
-
-        result = _resolve_gateways(("https://ipfs.io",), "http://localhost:8080")
-        assert result[0] == "http://localhost:8080"
-        assert "https://ipfs.io" in result
-
-    def test_resolve_gateways_no_kubo(self):
-        from reader.ipfs.gateway import _resolve_gateways
-
-        assert _resolve_gateways(("https://ipfs.io",), None) == ("https://ipfs.io",)
-
-    def test_resolve_gateways_dedup(self):
-        from reader.ipfs.gateway import _resolve_gateways
-
-        result = _resolve_gateways(("http://localhost:8080", "https://ipfs.io"), "http://localhost:8080")
-        assert result.count("http://localhost:8080") == 1
-
 
 class TestCliAutoDetectCid:
     def test_looks_like_cid_routes_to_open_by_cid(self, tmp_path: Path):
@@ -388,3 +368,43 @@ class TestCliAutoDetectCid:
         assert not _looks_like_cid("book.epub")
         assert not _looks_like_cid("/home/user/books/x.epub")
         assert not _looks_like_cid("")
+
+
+class TestCidContract:
+    """Валидация CID по контракту IPFS/IPLD (specs.ipfs.tech/cid)."""
+
+    def test_cidv0_base58btc(self):
+        # CIDv0: 46 символов base58btc, начинается с Qm
+        assert cid_is_valid("QmYwAPJzv4" + "a" * 36)
+        assert cid_is_valid("Qm" + "a" * 44)
+
+    def test_cidv1_base32(self):
+        # bafy... (dag-cbor), bafkrei... (raw) - из контракта
+        assert cid_is_valid("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou")
+        assert cid_is_valid("bafyreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq")
+
+    def test_cidv1_base16(self):
+        # f-префикс: base16, raw CIDv1 для "hello"
+        assert cid_is_valid("f01551220" + "2c" * 32)
+
+    def test_cidv1_base58btc(self):
+        # z-префикс: base58btc CIDv1 (реальный, собранный из base32-формы)
+        assert cid_is_valid("zdpuAoStiTAjdepMR7C7uVZUpQNChA2kLDmMMj1faemPzZwMu")
+
+    def test_rejects_garbage(self):
+        assert not cid_is_valid("not-a-cid")
+        assert not cid_is_valid("")
+        assert not cid_is_valid("book.epub")
+        assert not cid_is_valid("/home/user/x.epub")
+
+    def test_rejects_truncated(self):
+        # обрезанный base32 - структура не сходится
+        assert not cid_is_valid("bafyr4")
+
+    def test_rejects_wrong_multibase(self):
+        # неизвестный multibase-префикс
+        assert not cid_is_valid("x" + "a" * 50)
+
+    def test_rejects_cidv0_wrong_length(self):
+        # Qm но не 46 символов
+        assert not cid_is_valid("Qm" + "a" * 40)

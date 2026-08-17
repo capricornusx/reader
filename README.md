@@ -59,7 +59,7 @@ reader --import ~/books   # только импортировать, без ин
 
 Книгу в формате манифеста protocol-core можно открыть прямо по CID - reader сам распознаёт строку как CID по характерной форме и не требует отдельной подкоманды. Сначала делается HEAD-запрос к шлюзам (проверка доступности и размера), затем скачивается манифест как dag-json (ссылки в виде `{"/": cid}`) или сырой DAG-CBOR блок. Текст глав скачивается по CID из ресурсов-блобов.
 
-По умолчанию reader пробует локальный HTTP-шлюз Kubo (`http://localhost:8080`) первым - обычно быстрее публичных, затем публичные шлюзы (ipfs.io, dweb.link, cloudflare, pinata). Если HTTP-шлюзы недоступны, fallback на RPC API локального Kubo (`http://localhost:5001`, команды dag/get, block/get, cat).
+По умолчанию reader пробует шлюзы по очереди: локальный HTTP-шлюз Kubo (`http://localhost:8080`) первым, затем публичные (ipfs.io, dweb.link, cloudflare, pinata). Если Kubo не установлен, запрос к нему просто завершится с ошибкой и reader перейдёт к публичным шлюзам - это ничего не ломает.
 
 ```bash
 # открыть книгу по CID прямо в читалке
@@ -70,8 +70,8 @@ reader bafyr4... --save ~/books --format fb2
 reader bafyr4... --save ~/books --format epub
 reader bafyr4... --save ~/books --format native
 
-# свой публичный шлюз, свой локальный HTTP-шлюз Kubo и RPC API
-reader bafyr4... --ipfs-gateway https://dweb.link --kubo-gateway http://localhost:8080 --kubo http://localhost:5001
+# свой шлюз (можно несколько)
+reader bafyr4... --ipfs-gateway https://dweb.link
 ```
 
 Флаги:
@@ -80,9 +80,7 @@ reader bafyr4... --ipfs-gateway https://dweb.link --kubo-gateway http://localhos
 |---|---|
 | `--save DIR` | сохранить книгу в каталог вместо открытия в читалке |
 | `--format` | `native` (манифест), `fb2` или `epub` |
-| `--ipfs-gateway` | публичный шлюз IPFS (можно несколько) |
-| `--kubo-gateway` | локальный HTTP-шлюз Kubo (:8080), идёт первым |
-| `--kubo` | RPC API локального Kubo (:5001), fallback когда шлюзы молчат |
+| `--ipfs-gateway` | шлюз IPFS (можно несколько; по умолчанию локальный :8080 + публичные) |
 
 ## Клавиши
 

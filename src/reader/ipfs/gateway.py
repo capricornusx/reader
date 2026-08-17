@@ -14,7 +14,8 @@ DEFAULT_GATEWAYS = (
     "https://cloudflare-ipfs.com",
     "https://gateway.pinata.cloud",
 )
-DEFAULT_KUBO = "http://localhost:5001"
+DEFAULT_KUBO_RPC = "http://localhost:5001"
+DEFAULT_KUBO_GATEWAY = "http://localhost:8080"
 
 _CID_RE = re.compile(
     r"^(z1[A-HJ-NP-Za-km-z1-9]{44}|Qm[A-Za-z0-9]{44}|b[A-Za-z2-7]{58,})$"
@@ -46,13 +47,28 @@ def _gateway_url(gateway: str, cid: str, fmt: str | None = None) -> str:
     return url
 
 
-def probe(cid: str, gateways: tuple[str, ...] = DEFAULT_GATEWAYS, kubo: str | None = DEFAULT_KUBO) -> BlockInfo:
-    """Быстрая проверка доступности блока: HEAD по шлюзам, затем Kubo stat."""
-    for gateway in gateways:
+def _resolve_gateways(
+    gateways: tuple[str, ...],
+    kubo_gateway: str | None,
+) -> tuple[str, ...]:
+    """Локальный HTTP-шлюз Kubo идёт первым - обычно быстрее публичных."""
+    if not kubo_gateway:
+        return gateways
+    if kubo_gateway in gateways:
+        return gateways
+    return (kubo_gateway,) + gateways
+
+
+def probe(
+    cid: str,
+    gateways: tuple[str, ...] = DEFAULT_GATEWAYS,
+    kubo: str | None = DEFAULT_KUBO_RPC,
+    kubo_gateway: str | None = DEFAULT_KUBO_GATEWAY,
+) -> BlockInfo:
+    """Быстрая проверка: HEAD по шлюзам (локальный HTTP Kubo первым), затем Kubo RPC stat."""
+    for gw in _resolve_gateways(gateways, kubo_gateway):
         try:
-            req = urllib.request.Request(
-                _gateway_url(gateway, cid), method="HEAD"
-            )
+            req = urllib.request.Request(_gateway_url(gw, cid), method="HEAD")
             with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
                 size = resp.headers.get("Content-Length")
                 return BlockInfo(
@@ -69,18 +85,22 @@ def probe(cid: str, gateways: tuple[str, ...] = DEFAULT_GATEWAYS, kubo: str | No
     return BlockInfo(cid=cid, size=None, available=False)
 
 
-def fetch_manifest(cid: str, gateways: tuple[str, ...] = DEFAULT_GATEWAYS, kubo: str | None = DEFAULT_KUBO) -> dict:
+def fetch_manifest(
+    cid: str,
+    gateways: tuple[str, ...] = DEFAULT_GATEWAYS,
+    kubo: str | None = DEFAULT_KUBO_RPC,
+    kubo_gateway: str | None = DEFAULT_KUBO_GATEWAY,
+) -> dict:
     """Скачивает манифест книги и возвращает его как dict.
 
-    Сначала пытается получить dag-json (ссылки как {"/": cid}), затем
-    декодирует сырой DAG-CBOR блок. Если публичные шлюзы недоступны,
-    пробует локальный Kubo.
+    Сначала dag-json (ссылки как {"/": cid}), затем сырой DAG-CBOR блок.
+    Если публичные шлюзы недоступны, пробует локальный Kubo RPC.
     """
-    for gateway in gateways:
-        manifest = _fetch_dag_json(gateway, cid)
+    for gw in _resolve_gateways(gateways, kubo_gateway):
+        manifest = _fetch_dag_json(gw, cid)
         if manifest is not None:
             return manifest
-        manifest = _fetch_raw_block(gateway, cid)
+        manifest = _fetch_raw_block(gw, cid)
         if manifest is not None:
             return manifest
     if kubo:
@@ -93,11 +113,16 @@ def fetch_manifest(cid: str, gateways: tuple[str, ...] = DEFAULT_GATEWAYS, kubo:
     raise IpfsError(f"не удалось получить манифест {cid} ни через шлюзы, ни через Kubo")
 
 
-def fetch_blob(cid: str, gateways: tuple[str, ...] = DEFAULT_GATEWAYS, kubo: str | None = DEFAULT_KUBO) -> bytes:
+def fetch_blob(
+    cid: str,
+    gateways: tuple[str, ...] = DEFAULT_GATEWAYS,
+    kubo: str | None = DEFAULT_KUBO_RPC,
+    kubo_gateway: str | None = DEFAULT_KUBO_GATEWAY,
+) -> bytes:
     """Скачивает сырой блок (текст главы, обложка) по CID."""
-    for gateway in gateways:
+    for gw in _resolve_gateways(gateways, kubo_gateway):
         try:
-            req = urllib.request.Request(_gateway_url(gateway, cid))
+            req = urllib.request.Request(_gateway_url(gw, cid))
             with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
                 return resp.read()
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):

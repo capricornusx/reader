@@ -18,21 +18,33 @@ def _default_db_path() -> Path:
 def main(argv: list[str] | None = None) -> int:
     raw = list(argv) if argv is not None else sys.argv[1:]
 
-    # Подкоманда cid обрабатывается раньше основного парсера, потому что
-    # опциональный позиционный path конфликтует с именем подкоманды в argparse.
-    if raw and raw[0] == "cid":
-        return _cmd_open_cid(_parse_cid_args(raw[1:]))
-
     parser = argparse.ArgumentParser(
         prog="reader",
         description="Консольная читалка книг (TXT, EPUB, FB2). "
-        "Без аргументов открывает библиотеку; можно передать файл книги или папку.",
+        "Без аргументов открывает библиотеку; можно передать файл книги, папку или CID.",
     )
-    parser.add_argument("path", nargs="?", type=Path, help="файл книги или папка")
+    parser.add_argument(
+        "path", nargs="?", type=str,
+        help="файл книги, папка или CID манифеста IPFS",
+    )
     parser.add_argument("--library", type=Path, default=_default_db_path(), help="путь к файлу библиотеки SQLite")
     parser.add_argument(
         "--import", dest="import_dir", metavar="DIR",
         help="рекурсивно импортировать книги из папки и выйти",
+    )
+    parser.add_argument(
+        "--save", metavar="DIR",
+        help="сохранить книгу (CID) в каталог вместо открытия в читалке",
+    )
+    parser.add_argument(
+        "--format", choices=("native", "fb2", "epub"), default="native",
+        help="формат сохранения книги из IPFS (по умолчанию нативный манифест)",
+    )
+    parser.add_argument("--ipfs-gateway", action="append", help="публичный шлюз IPFS (можно несколько)")
+    parser.add_argument("--kubo", default="http://localhost:5001", help="адрес RPC API локального Kubo (:5001)")
+    parser.add_argument(
+        "--kubo-gateway", default="http://localhost:8080",
+        help="адрес локального HTTP-шлюза Kubo (:8080)",
     )
 
     args = parser.parse_args(raw)
@@ -49,12 +61,18 @@ def main(argv: list[str] | None = None) -> int:
         db.close()
         return 0
 
-    if args.path is not None and not args.path.exists():
+    if args.path is not None and _looks_like_cid(args.path):
+        db.close()
+        return _open_cid(args.path, args)
+
+    if args.path is not None and not Path(args.path).exists():
         print(f"reader: путь не существует: {args.path}", file=sys.stderr)
+        db.close()
         return 2
 
+    open_path = Path(args.path) if args.path is not None else None
     try:
-        ReaderApp(args.library, open_path=args.path).run()
+        ReaderApp(args.library, open_path=open_path).run()
     except Exception as e:  # noqa: BLE001
         print(f"Ошибка запуска: {e}", file=sys.stderr)
         return 1
@@ -63,20 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _parse_cid_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="reader cid", description="открыть книгу по CID манифеста IPFS")
-    parser.add_argument("cid", help="CID манифеста книги")
-    parser.add_argument(
-        "--save", metavar="DIR",
-        help="сохранить книгу в каталог вместо открытия в читалке",
-    )
-    parser.add_argument(
-        "--format", choices=("native", "fb2", "epub"), default="native",
-        help="формат сохранения (по умолчанию нативный манифест)",
-    )
-    parser.add_argument("--ipfs-gateway", action="append", help="публичный шлюз IPFS (можно несколько)")
-    parser.add_argument("--kubo", default="http://localhost:5001", help="адрес локального Kubo API")
-    return parser.parse_args(argv)
+def _looks_like_cid(value: str) -> bool:
+    from .ipfs.gateway import is_cid
+
+    return is_cid(value)
 
 
 def _manifest_from_book(book, cid: str) -> dict:
@@ -104,12 +112,13 @@ def _safe_filename(title: str) -> str:
     return safe or "book"
 
 
-def _cmd_open_cid(args) -> int:
+def _open_cid(cid: str, args) -> int:
     from .ipfs import book as ipfs_book
     from .ipfs.gateway import DEFAULT_GATEWAYS
 
     gateways = tuple(args.ipfs_gateway) if args.ipfs_gateway else DEFAULT_GATEWAYS
     kubo = args.kubo if args.kubo else None
+    kubo_gateway = args.kubo_gateway if args.kubo_gateway else None
 
     def on_progress(p):
         if p.stage == "probe":
@@ -123,7 +132,9 @@ def _cmd_open_cid(args) -> int:
             print("Готово.")
 
     try:
-        book = ipfs_book.open_by_cid(args.cid, gateways=gateways, kubo=kubo, on_progress=on_progress)
+        book = ipfs_book.open_by_cid(
+            cid, gateways=gateways, kubo=kubo, kubo_gateway=kubo_gateway, on_progress=on_progress
+        )
     except Exception as e:  # noqa: BLE001
         print(f"reader: {e}", file=sys.stderr)
         return 3
@@ -135,7 +146,7 @@ def _cmd_open_cid(args) -> int:
         if args.format == "native":
             out = save_dir / f"{name}.ipfsbook"
             out.write_text(
-                json.dumps(_manifest_from_book(book, args.cid), ensure_ascii=False, indent=2),
+                json.dumps(_manifest_from_book(book, cid), ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         else:
@@ -154,7 +165,7 @@ def _cmd_open_cid(args) -> int:
 
         with tempfile.NamedTemporaryFile(suffix=".ipfsbook", delete=False) as tmp:
             tmp.write(
-                json.dumps(_manifest_from_book(book, args.cid), ensure_ascii=False, indent=2).encode("utf-8")
+                json.dumps(_manifest_from_book(book, cid), ensure_ascii=False, indent=2).encode("utf-8")
             )
             tmp_path = Path(tmp.name)
         import_book(db, tmp_path)

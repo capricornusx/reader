@@ -49,6 +49,7 @@ export PATH="$HOME/.local/bin:$PATH"
 reader                # библиотека
 reader book.epub      # сразу открыть книгу
 reader ~/books        # импортировать папку и показать библиотеку
+reader bafyr4...       # открыть книгу из IPFS по CID
 reader --import ~/books   # только импортировать, без интерфейса
 ```
 
@@ -56,19 +57,21 @@ reader --import ~/books   # только импортировать, без ин
 
 ## Книги из IPFS
 
-Книги в формате манифеста protocol-core можно открыть прямо по CID. Сначала reader делает HEAD-запрос к публичным шлюзам IPFS (проверка доступности и размера), затем скачивает манифест как dag-json (ссылки в виде `{"/": cid}`) или сырой DAG-CBOR блок. Если публичные шлюзы недоступны, пробует локальный Kubo (`http://localhost:5001`). Текст глав скачивается по CID из ресурсов-блобов.
+Книгу в формате манифеста protocol-core можно открыть прямо по CID - reader сам распознаёт строку как CID по характерной форме и не требует отдельной подкоманды. Сначала делается HEAD-запрос к шлюзам (проверка доступности и размера), затем скачивается манифест как dag-json (ссылки в виде `{"/": cid}`) или сырой DAG-CBOR блок. Текст глав скачивается по CID из ресурсов-блобов.
+
+По умолчанию reader пробует локальный HTTP-шлюз Kubo (`http://localhost:8080`) первым - обычно быстрее публичных, затем публичные шлюзы (ipfs.io, dweb.link, cloudflare, pinata). Если HTTP-шлюзы недоступны, fallback на RPC API локального Kubo (`http://localhost:5001`, команды dag/get, block/get, cat).
 
 ```bash
-# открыть книгу по CID манифеста прямо в читалке
-reader cid bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou
+# открыть книгу по CID прямо в читалке
+reader bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou
 
 # сохранить в каталог в выбранном формате (нативный манифест, fb2 или epub)
-reader cid bafyr4... --save ~/books --format fb2
-reader cid bafyr4... --save ~/books --format epub
-reader cid bafyr4... --save ~/books --format native
+reader bafyr4... --save ~/books --format fb2
+reader bafyr4... --save ~/books --format epub
+reader bafyr4... --save ~/books --format native
 
-# свой шлюз или локальный Kubo
-reader cid bafyr4... --ipfs-gateway https://dweb.link --kubo http://localhost:5001
+# свой публичный шлюз, свой локальный HTTP-шлюз Kubo и RPC API
+reader bafyr4... --ipfs-gateway https://dweb.link --kubo-gateway http://localhost:8080 --kubo http://localhost:5001
 ```
 
 Флаги:
@@ -78,7 +81,8 @@ reader cid bafyr4... --ipfs-gateway https://dweb.link --kubo http://localhost:50
 | `--save DIR` | сохранить книгу в каталог вместо открытия в читалке |
 | `--format` | `native` (манифест), `fb2` или `epub` |
 | `--ipfs-gateway` | публичный шлюз IPFS (можно несколько) |
-| `--kubo` | адрес локального Kubo API |
+| `--kubo-gateway` | локальный HTTP-шлюз Kubo (:8080), идёт первым |
+| `--kubo` | RPC API локального Kubo (:5001), fallback когда шлюзы молчат |
 
 ## Клавиши
 

@@ -229,6 +229,7 @@ class TestManifestFromCid:
                 manifest_cid,
                 gateways=("https://x",),
                 kubo=None,
+                kubo_gateway=None,
                 on_progress=lambda p: stages.append(p.stage),
             )
         assert book.title == "Полный путь"
@@ -238,11 +239,11 @@ class TestManifestFromCid:
     def test_open_by_cid_unavailable(self):
         with mock.patch("urllib.request.urlopen", side_effect=OSError("nope")):
             with pytest.raises(ManifestError, match="недоступен"):
-                open_by_cid("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None)
+                open_by_cid("bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou", gateways=("https://x",), kubo=None, kubo_gateway=None)
 
     def test_open_by_cid_bad_cid(self):
         with pytest.raises(ManifestError, match="некорректный"):
-            open_by_cid("garbage", gateways=("https://x",), kubo=None)
+            open_by_cid("garbage", gateways=("https://x",), kubo=None, kubo_gateway=None)
 
 
 def _ctx(resp):
@@ -324,3 +325,66 @@ class TestExporters:
     def test_convert_unknown_format(self, book):
         with pytest.raises(ValueError):
             convert(book, "pdf")
+
+
+class TestGatewayKuboGateway:
+    def test_resolve_gateways_puts_kubo_first(self):
+        from reader.ipfs.gateway import _resolve_gateways
+
+        result = _resolve_gateways(("https://ipfs.io",), "http://localhost:8080")
+        assert result[0] == "http://localhost:8080"
+        assert "https://ipfs.io" in result
+
+    def test_resolve_gateways_no_kubo(self):
+        from reader.ipfs.gateway import _resolve_gateways
+
+        assert _resolve_gateways(("https://ipfs.io",), None) == ("https://ipfs.io",)
+
+    def test_resolve_gateways_dedup(self):
+        from reader.ipfs.gateway import _resolve_gateways
+
+        result = _resolve_gateways(("http://localhost:8080", "https://ipfs.io"), "http://localhost:8080")
+        assert result.count("http://localhost:8080") == 1
+
+
+class TestCliAutoDetectCid:
+    def test_looks_like_cid_routes_to_open_by_cid(self, tmp_path: Path):
+        from reader.cli import main
+        from reader.ipfs.gateway import BlockInfo
+
+        cid = "bafyr4if6vvekqtazlxcqwaepsx4cwq4knpw5ueanghaukvhrqqxchf4oou"
+        manifest = {
+            "@context": "ipfs://schema/book/0.1.0",
+            "contentType": "book",
+            "title": "CLI авто-CID",
+            "components": [
+                {"title": "Глава", "position": 1, "kind": "chapter",
+                 "resources": [{"cid": {"/": "bafyblob"}, "mediaType": "text/plain", "role": "text"}]},
+            ],
+        }
+
+        def fake_probe(cid, gateways=(), kubo=None, kubo_gateway=None):
+            return BlockInfo(cid=cid, available=True, size=10)
+
+        def fake_fetch_manifest(cid, gateways=(), kubo=None, kubo_gateway=None):
+            return manifest
+
+        def fake_fetch_blob(cid, gateways=(), kubo=None, kubo_gateway=None):
+            return "Текст главы.".encode("utf-8")
+
+        save_dir = tmp_path / "out"
+        with mock.patch("reader.ipfs.gateway.probe", fake_probe), \
+             mock.patch("reader.ipfs.gateway.fetch_manifest", fake_fetch_manifest), \
+             mock.patch("reader.ipfs.gateway.fetch_blob", fake_fetch_blob):
+            ret = main([cid, "--save", str(save_dir), "--format", "native", "--library", str(tmp_path / "lib.db")])
+        assert ret == 0
+        files = list(save_dir.iterdir())
+        assert any(f.suffix == ".ipfsbook" for f in files)
+
+    def test_non_cid_path_not_routed(self, tmp_path: Path):
+        # обычный путь к файлу не должен попасть в _open_cid
+        from reader.cli import main, _looks_like_cid
+
+        assert not _looks_like_cid("book.epub")
+        assert not _looks_like_cid("/home/user/books/x.epub")
+        assert not _looks_like_cid("")

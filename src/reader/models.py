@@ -19,6 +19,7 @@ class Format(str, Enum):
     MOBI = "mobi"
     DJVU = "djvu"
     DOC = "doc"
+    IPFSBOOK = "ipfsbook"
     UNKNOWN = "unknown"
 
 

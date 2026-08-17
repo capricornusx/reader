@@ -10,6 +10,7 @@ from .docx import parse_docx
 from .epub import parse_epub
 from .fb2 import parse_fb2
 from .html import parse_html
+from .ipfsbook import parse_ipfsbook
 from .markdown import parse_markdown
 from .mobi import parse_mobi
 from .pdf import parse_pdf
@@ -28,6 +29,7 @@ PARSERS = {
     Format.MOBI: parse_mobi,
     Format.DJVU: parse_djvu,
     Format.DOC: parse_doc,
+    Format.IPFSBOOK: parse_ipfsbook,
 }
 
 

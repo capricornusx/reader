@@ -113,6 +113,71 @@ def build_epub(title: str = "Тестовая книга", author: str = "Ива
     return buf.getvalue()
 
 
+def build_ipfsbook(
+    title: str = "Тестовая книга",
+    author: str = "Иван Автор",
+    year: int = 2020,
+) -> bytes:
+    """Манифест книги в формате protocol-core Book (JSON-сериализация).
+
+    Зеркалит структуру Album: releaseGroupId/releaseId, contentType, contributors,
+    components (WorkComponent, kind=chapter) с resources (ContentBlob, role=text,
+    inline-текст)."""
+    import json
+
+    manifest = {
+        "@context": "ipfs://schema/book/0.1.0",
+        "version": 1,
+        "releaseGroupId": "11111111-1111-1111-1111-111111111111",
+        "releaseId": "22222222-2222-2222-2222-222222222222",
+        "contentType": "book",
+        "title": title,
+        "contributors": [{"name": author, "role": "author"}],
+        "bookDetails": {
+            "isbn": "978-3-16-148410-0",
+            "publisher": "Издательство",
+            "language": "ru",
+            "year": year,
+            "description": "Аннотация тестовой книги.",
+        },
+        "components": [
+            {
+                "title": "Глава первая",
+                "position": 1,
+                "kind": "chapter",
+                "resources": [
+                    {
+                        "cid": "bafy111111111111111111111111111111111111111111111",
+                        "mediaType": "text/plain",
+                        "role": "text",
+                        "size": 64,
+                        "text": (
+                            "Первый абзац первой главы. Второе предложение.\n\n"
+                            "Второй абзац первой главы."
+                        ),
+                    }
+                ],
+            },
+            {
+                "title": "Глава вторая",
+                "position": 2,
+                "kind": "chapter",
+                "resources": [
+                    {
+                        "cid": "bafy222222222222222222222222222222222222222222222",
+                        "mediaType": "text/plain",
+                        "role": "text",
+                        "size": 34,
+                        "text": "Первый абзац второй главы.",
+                    }
+                ],
+            },
+        ],
+        "originalDate": f"{year}-01-01",
+    }
+    return json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+
+
 def write_fixture(path, content: bytes) -> None:
     path.write_bytes(content)
 
